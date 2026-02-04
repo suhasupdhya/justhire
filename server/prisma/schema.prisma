@@ -1,0 +1,83 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CANDIDATE
+  RECRUITER
+}
+
+enum ApplicationStatus {
+  APPLIED
+  SHORTLISTED
+  REJECTED
+  HIRED
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      Role     @default(CANDIDATE)
+  createdAt DateTime @default(now())
+
+  jobs         Job[]          @relation("CreatedJobs")
+  applications Application[]
+}
+
+model Job {
+  id             String   @id @default(uuid())
+  title          String
+  description    String
+  recruiterId    String
+  recruiter      User     @relation("CreatedJobs", fields: [recruiterId], references: [id])
+  requiredSkills String[] 
+  createdAt      DateTime @default(now())
+  
+  applications Application[]
+  assessments  Assessment[]
+}
+
+model Application {
+  id          String            @id @default(uuid())
+  jobId       String
+  job         Job               @relation(fields: [jobId], references: [id])
+  candidateId String
+  candidate   User              @relation(fields: [candidateId], references: [id])
+  resumeUrl   String
+  parsedData  Json?             @default("{}") // Extracted skills, exp
+  status      ApplicationStatus @default(APPLIED)
+  matchScore  Int               @default(0) // 0-100
+  createdAt   DateTime          @default(now())
+
+  attempts    AssessmentAttempt[]
+}
+
+model Assessment {
+  id        String   @id @default(uuid())
+  jobId     String
+  job       Job      @relation(fields: [jobId], references: [id])
+  title     String
+  questions Json     // List of { type: 'MCQ'|'CODE'|'TEXT'|'SLIDER', prompt: string, options?: [], correct?: any }
+  createdAt DateTime @default(now())
+}
+
+model AssessmentAttempt {
+  id            String      @id @default(uuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id])
+  answers       Json        // stored answers
+  technicalScore Float      @default(0)
+  psychometricScore Float   @default(0)
+  totalScore    Float       @default(0)
+  integrityLog  Json?       // Proctoring logs
+  aiDecision    String?     // The explainable text
+  startedAt     DateTime    @default(now())
+  submittedAt   DateTime?
+}
