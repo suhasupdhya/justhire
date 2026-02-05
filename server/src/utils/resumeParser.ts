@@ -1,4 +1,6 @@
-const pdf = require('pdf-parse');
+
+// @ts-ignore
+import { PDFParse } from 'pdf-parse';
 import fs from 'fs';
 
 interface ParsedResume {
@@ -9,15 +11,26 @@ interface ParsedResume {
 
 // Simple rule-based extraction
 export const parseResume = async (filePath: string): Promise<ParsedResume> => {
+    let parser: any = null;
     try {
         const dataBuffer = fs.readFileSync(filePath);
-        const data = await pdf(dataBuffer);
+        // v2 API usage
+        parser = new PDFParse({ data: dataBuffer });
+        const data = await parser.getText();
         const text = data.text as string;
+        await parser.destroy();
+        parser = null;
+
 
         // Simple keyword extraction based on common tech skills
         const commonSkills = ['JavaScript', 'TypeScript', 'React', 'Node.js', 'Python', 'Java', 'C++', 'SQL', 'PostgreSQL', 'Docker', 'AWS', 'HTML', 'CSS', 'Tailwind'];
+
+        const escapeRegExp = (string: string) => {
+            return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        };
+
         const foundSkills = commonSkills.filter(skill =>
-            new RegExp(`\\b${skill}\\b`, 'i').test(text)
+            new RegExp(`\\b${escapeRegExp(skill)}\\b`, 'i').test(text)
         );
 
         // Naive education extraction (looking for keywords like "Bachelor", "Master", "University", "College")

@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import api from '../api/axios';
 import JobCard from '../components/JobCard';
 import { Plus } from 'lucide-react';
-import CreateJobModal from '../components/CreateJobModal'; // We'll make this next
+import CreateJobModal from '../components/CreateJobModal';
+import JobApplicationsModal from '../components/JobApplicationsModal';
 
 interface Job {
     id: string;
@@ -16,6 +17,7 @@ interface Job {
 const RecruiterDashboard: React.FC = () => {
     const [jobs, setJobs] = useState<Job[]>([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [viewAppsJobId, setViewAppsJobId] = useState<string | null>(null);
 
     useEffect(() => {
         fetchJobs();
@@ -49,7 +51,7 @@ const RecruiterDashboard: React.FC = () => {
                         key={job.id}
                         job={job}
                         isRecruiter={true}
-                        onViewApplications={(id) => console.log('View apps', id)}
+                        onViewApplications={(id) => setViewAppsJobId(id)}
                     />
                 ))}
             </div>
@@ -61,6 +63,13 @@ const RecruiterDashboard: React.FC = () => {
                     onJobCreated={fetchJobs}
                 />
             )}
+
+            <JobApplicationsModal
+                isOpen={!!viewAppsJobId}
+                onClose={() => setViewAppsJobId(null)}
+                jobId={viewAppsJobId}
+                jobTitle={jobs.find(j => j.id === viewAppsJobId)?.title || ''}
+            />
         </div>
     );
 };
