@@ -58,7 +58,7 @@ export const submitAssessment = async (req: AuthRequest, res: Response): Promise
         const psychometricScore = Math.floor(Math.random() * 40) + 50; // Mock 50-90
         const totalScore = Math.round((technicalScore * 0.7) + (psychometricScore * 0.3));
 
-        // Rule-based "Explainable AI" generation
+        // Rule-based "Explainable AI" generation with integrity and resume feedback
         let decision = "NO_HIRE";
         let explanation = "";
 
@@ -70,6 +70,42 @@ export const submitAssessment = async (req: AuthRequest, res: Response): Promise
             explanation = `**Potential Candidate**. Technical skills are solid (${technicalScore}%), but psychometric indicators suggestion interactions under stress could be improved (${psychometricScore}%). Recommended for a technical interview to probe cultural fit.\n\n**Areas to Probe:**\n- Team conflict resolution\n- Code maintainability`;
         } else {
             explanation = `**No Hire Recommended**. While the candidate attempted all sections, the technical foundation (${technicalScore}%) does not meet the senior bar properly. Coding solutions lacked edge-case handling.`;
+        }
+
+        // Attach integrity summary
+        const attemptRecord = await prisma.assessmentAttempt.findUnique({ where: { id: attemptId } });
+        const integrityLog = (attemptRecord?.integrityLog as any[]) || [];
+        if (integrityLog.length) {
+            const eventsSummary = integrityLog.reduce((acc: any, ev: any) => {
+                acc[ev.eventType] = (acc[ev.eventType] || 0) + 1;
+                return acc;
+            }, {});
+            explanation += `\n\n**Integrity Summary:** ${integrityLog.length} event(s) recorded. `;
+            const eventTypes = Object.entries(eventsSummary).map(([k, v]) => `${k}: ${v}`).join(', ');
+            explanation += eventTypes + `.`;
+        }
+
+        // Attach resume / skills feedback when available
+        const attemptWithApp = await prisma.assessmentAttempt.findUnique({
+            where: { id: attemptId },
+            include: { application: { include: { job: true } } }
+        });
+
+        const application = attemptWithApp?.application;
+        if (application) {
+            const jobSkills: string[] = (application.job?.requiredSkills as string[]) || [];
+            const parsed = (application.parsedData as any) || {};
+            const resumeSkills: string[] = parsed.skills || [];
+
+            if (jobSkills.length) {
+                const missing = jobSkills.filter(s => !resumeSkills.map((r: string) => r.toLowerCase()).includes(s.toLowerCase()));
+                explanation += `\n\n**Resume Match:** Candidate mentions ${resumeSkills.length} detected skill(s). Job requires ${jobSkills.length} skill(s).`;
+                if (missing.length) {
+                    explanation += `\n**Missing / Weak Skills:** ${missing.join(', ')}.`;
+                } else {
+                    explanation += `\n**Resume covers required skills for this role.**`;
+                }
+            }
         }
 
         const attempt = await prisma.assessmentAttempt.update({

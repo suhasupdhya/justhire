@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Editor from '@monaco-editor/react';
 import { Play, CheckCircle, AlertCircle, ChevronRight, Save } from 'lucide-react';
 import api from '../api/axios';
@@ -15,6 +15,9 @@ const AssessmentRunner: React.FC<Props> = ({ jobId, attemptId }) => {
     const [output, setOutput] = useState('');
     const [executing, setExecuting] = useState(false);
     const [warnings, setWarnings] = useState(0);
+    const [faceCount, setFaceCount] = useState(0);
+    const [multipleWarning, setMultipleWarning] = useState(false);
+    const lastFaceLogRef = useRef<number>(0);
     const navigate = useNavigate();
 
     // Proctoring Logic
@@ -40,9 +43,47 @@ const AssessmentRunner: React.FC<Props> = ({ jobId, attemptId }) => {
             })
             .catch(err => console.error("Webcam access denied", err));
 
+        // Start lightweight face detection (dynamic import to keep bundle small)
+        let intervalId: any = null;
+        let model: any = null;
+        (async () => {
+            try {
+                const tf = await import('@tensorflow/tfjs');
+                await import('@tensorflow/tfjs-backend-webgl');
+                await tf.setBackend('webgl');
+                const blazeface = await import('@tensorflow-models/blazeface');
+                const video = document.getElementById('webcam-feed') as HTMLVideoElement;
+                model = await blazeface.load();
+
+                intervalId = setInterval(async () => {
+                    try {
+                        if (video && model && video.readyState >= 2) {
+                            const predictions = await model.estimateFaces(video, false);
+                            const count = Array.isArray(predictions) ? predictions.length : 0;
+                            setFaceCount(count);
+                            if (count > 1) {
+                                setMultipleWarning(true);
+                                // throttle logging to once every 10s
+                                const now = Date.now();
+                                if (now - (lastFaceLogRef.current || 0) > 10000) {
+                                    lastFaceLogRef.current = now;
+                                    triggerViolation('MULTIPLE_FACES', `Detected ${count} faces on camera`);
+                                }
+                            } else {
+                                setMultipleWarning(false);
+                            }
+                        }
+                    } catch (e) { /* detection errors should not break session */ }
+                }, 3000);
+            } catch (e) {
+                console.warn('Face model load failed', e);
+            }
+        })();
+
         return () => {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
             window.removeEventListener('blur', handleBlur);
+            try { if (intervalId) clearInterval(intervalId); } catch (e) {}
         };
     }, []);
 
@@ -69,8 +110,15 @@ const AssessmentRunner: React.FC<Props> = ({ jobId, attemptId }) => {
 
     const handleSubmit = async () => {
         try {
-            await api.post('/assessments/submit', { attemptId, answers: { code } });
-            alert('Assessment Submitted!');
+            const res = await api.post('/assessments/submit', { attemptId, answers: { code } });
+            const attempt = res.data;
+            // If AI decision text exists, show it as feedback; otherwise navigate
+            if (attempt && attempt.aiDecision) {
+                // Show modal with explanation (simple alert for now)
+                alert(`Assessment Submitted!\n\nExplanation:\n${attempt.aiDecision}`);
+            } else {
+                alert('Assessment Submitted!');
+            }
             navigate('/dashboard');
         } catch (error) {
             alert('Submit failed');
@@ -79,6 +127,15 @@ const AssessmentRunner: React.FC<Props> = ({ jobId, attemptId }) => {
 
     return (
         <div className="h-screen flex flex-col bg-slate-900 text-slate-100 overflow-hidden">
+            {multipleWarning && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70">
+                    <div className="bg-red-700/95 text-white p-6 rounded-lg max-w-lg text-center">
+                        <h3 className="text-lg font-bold mb-2">Multiple People Detected</h3>
+                        <p className="mb-4">Our camera detected more than one face in view. This violates the integrity policy. Please ensure you are the only person in front of the camera.</p>
+                        <p className="text-sm opacity-80">This incident has been logged. Continued violations may result in disqualification.</p>
+                    </div>
+                </div>
+            )}
             {/* Header / Progress */}
             <div className="h-16 border-b border-slate-700 bg-slate-800 flex items-center justify-between px-6">
                 <h2 className="font-bold text-lg">Assessment Run &bull; Step {step}/4</h2>
